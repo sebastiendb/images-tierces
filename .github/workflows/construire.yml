@@ -1,0 +1,65 @@
+name: Construire une image tierce
+# Reconstruit l'image d'un projet amont depuis un tag précis, quand l'éditeur
+# ne publie pas d'image corrigée (ex. cap-web, 13/11/2026 : latest en Next.js 16.3.0).
+on:
+  workflow_dispatch:
+    inputs:
+      depot:
+        description: "Dépôt amont (org/nom)"
+        required: true
+      ref:
+        description: "Tag ou commit amont"
+        required: true
+      dockerfile:
+        description: "Chemin du Dockerfile dans le dépôt amont"
+        required: true
+      image:
+        description: "Nom de l'image publiée (ghcr.io/sebastiendb/<image>)"
+        required: true
+      tag:
+        description: "Tag de l'image publiée"
+        required: true
+      env_racine:
+        description: "Lignes du .env à la racine du contexte, séparées par ';' (facultatif)"
+        required: false
+        default: ""
+      plateformes:
+        description: "Plateformes"
+        required: false
+        default: "linux/amd64"
+
+jobs:
+  construire:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ inputs.depot }}
+          ref: ${{ inputs.ref }}
+          path: amont
+      - name: .env de construction
+        if: ${{ inputs.env_racine != '' }}
+        env:
+          LIGNES: ${{ inputs.env_racine }}
+        run: printf '%s\n' "$LIGNES" | tr ';' '\n' > amont/.env
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Construire et publier
+        uses: docker/build-push-action@v6
+        with:
+          context: amont
+          file: amont/${{ inputs.dockerfile }}
+          platforms: ${{ inputs.plateformes }}
+          push: true
+          provenance: false
+          tags: ghcr.io/sebastiendb/${{ inputs.image }}:${{ inputs.tag }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/sebastiendb/images-tierces
+            org.opencontainers.image.revision=${{ inputs.depot }}@${{ inputs.ref }}
